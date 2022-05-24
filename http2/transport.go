@@ -291,6 +291,9 @@ type ClientConn struct {
 	// Lock reqmu BEFORE mu or wmu.
 	reqHeaderMu chan struct{}
 
+	// true if the server responded with SETTINGS_ENABLE_CONNECT_PROTOCOL=1
+	serverAllowsExtendedConnect bool
+
 	// wmu is held while writing.
 	// Acquire BEFORE mu when holding both, to avoid blocking mu on network writes.
 	// Only acquire both at the same time when changing peer settings.
@@ -1118,6 +1121,14 @@ func (cc *ClientConn) decrStreamReservationsLocked() {
 }
 
 func (cc *ClientConn) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Method == "CONNECT" && req.Header.Get("HACK-HTTP2-Protocol") != "" {
+		// This is an extended CONNECT https://datatracker.ietf.org/doc/html/rfc8441#section-4
+		// We need to check if the server supports it.
+		if err := cc.checkServerSupportsExtendedConnect(); err != nil {
+			return nil, err
+		}
+	}
+
 	ctx := req.Context()
 	cs := &clientStream{
 		cc:                   cc,
@@ -1197,6 +1208,33 @@ func (cc *ClientConn) RoundTrip(req *http.Request) (*http.Response, error) {
 			return nil, errRequestCanceled
 		}
 	}
+}
+
+func (cc *ClientConn) checkServerSupportsExtendedConnect() error {
+	if !cc.seenSettings {
+		// If we have not yet seen the server's settings frame, we
+		// are likely the first connection to this host. We should
+		// force the issue by sending a ping. Ping will block
+		// until we get the pong back or the connection's context gets
+		// canceled.
+		pingTimeout := cc.t.pingTimeout()
+		ctx, cancel := context.WithTimeout(context.Background(), pingTimeout)
+		defer cancel()
+		err := cc.Ping(ctx)
+		if err != nil {
+			return fmt.Errorf("http2: fetching server settings: %w", err)
+		}
+
+		if !cc.seenSettings {
+			return errors.New("http2: refused to send settings frame")
+		}
+	}
+
+	if !cc.serverAllowsExtendedConnect {
+		return errors.New("http2: server does not support extended connect")
+	}
+
+	return nil
 }
 
 // doRequest runs for the duration of the request lifetime.
@@ -1662,6 +1700,7 @@ func (cs *clientStream) writeRequestBody(req *http.Request) (err error) {
 		return err
 	}
 
+
 	cc.wmu.Lock()
 	defer cc.wmu.Unlock()
 	var trls []byte
@@ -1744,8 +1783,10 @@ func (cc *ClientConn) encodeHeaders(req *http.Request, addGzipHeader bool, trail
 		return nil, err
 	}
 
+	protocol := req.Header.Get("HACK-HTTP2-Protocol")
+
 	var path string
-	if req.Method != "CONNECT" {
+	if req.Method != "CONNECT" || (cc.serverAllowsExtendedConnect && protocol != "") {
 		path = req.URL.RequestURI()
 		if !validPseudoPath(path) {
 			orig := path
@@ -1787,10 +1828,15 @@ func (cc *ClientConn) encodeHeaders(req *http.Request, addGzipHeader bool, trail
 			m = http.MethodGet
 		}
 		f(":method", m)
-		if req.Method != "CONNECT" {
+
+		if req.Method != "CONNECT" || (cc.serverAllowsExtendedConnect && protocol != "") {
 			f(":path", path)
 			f(":scheme", req.URL.Scheme)
+			if protocol != "" {
+				f(":protocol", protocol)
+			}
 		}
+
 		if trailers != "" {
 			f("trailer", trailers)
 		}
@@ -2709,6 +2755,8 @@ func (rl *clientConnReadLoop) processSettingsNoWrite(f *SettingsFrame) error {
 			seenMaxConcurrentStreams = true
 		case SettingMaxHeaderListSize:
 			cc.peerMaxHeaderListSize = uint64(s.Val)
+		case SettingEnableConnectProtocol:
+			cc.serverAllowsExtendedConnect = s.Val == 1
 		case SettingInitialWindowSize:
 			// Values above the maximum flow-control
 			// window size of 2^31-1 MUST be treated as a

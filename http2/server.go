@@ -829,6 +829,7 @@ func (sc *serverConn) serve() {
 			{SettingMaxConcurrentStreams, sc.advMaxStreams},
 			{SettingMaxHeaderListSize, sc.maxHeaderListSize()},
 			{SettingInitialWindowSize, uint32(sc.srv.initialStreamRecvWindowSize())},
+			{SettingEnableConnectProtocol, 1},
 		},
 	})
 	sc.unackedSettings++
@@ -2012,12 +2013,23 @@ func (sc *serverConn) newWriterAndRequest(st *stream, f *MetaHeadersFrame) (*res
 		scheme:    f.PseudoValue("scheme"),
 		authority: f.PseudoValue("authority"),
 		path:      f.PseudoValue("path"),
+		protocol:  f.PseudoValue("protocol"),
 	}
 
 	isConnect := rp.method == "CONNECT"
 	if isConnect {
-		if rp.path != "" || rp.scheme != "" || rp.authority == "" {
-			return nil, nil, sc.countError("bad_connect", streamError(f.StreamID, ErrCodeProtocol))
+		if rp.protocol == "" {
+			// This is an ordinary CONNECT. It should only have a host (authority).
+			if rp.path != "" || rp.scheme != "" || rp.authority == "" {
+				return nil, nil, sc.countError("bad_connect", streamError(f.StreamID, ErrCodeProtocol))
+			}
+		} else {
+			// This is an extended CONNECT (https://datatracker.ietf.org/doc/html/rfc8441#section-4)
+
+			// we MUST have a scheme and path
+			if rp.path == "" || rp.scheme == "" {
+				return nil, nil, sc.countError("bad_connect", streamError(f.StreamID, ErrCodeProtocol))
+			}
 		}
 	} else if rp.method == "" || rp.path == "" || (rp.scheme != "https" && rp.scheme != "http") {
 		// See 8.1.2.6 Malformed Requests and Responses:
@@ -2071,6 +2083,7 @@ func (sc *serverConn) newWriterAndRequest(st *stream, f *MetaHeadersFrame) (*res
 type requestParam struct {
 	method                  string
 	scheme, authority, path string
+	protocol                string
 	header                  http.Header
 }
 
@@ -2112,7 +2125,7 @@ func (sc *serverConn) newWriterAndRequestNoBody(st *stream, rp requestParam) (*r
 
 	var url_ *url.URL
 	var requestURI string
-	if rp.method == "CONNECT" {
+	if rp.method == "CONNECT" && rp.protocol == "" {
 		url_ = &url.URL{Host: rp.authority}
 		requestURI = rp.authority // mimic HTTP/1 server behavior
 	} else {
