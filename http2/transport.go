@@ -1121,7 +1121,7 @@ func (cc *ClientConn) decrStreamReservationsLocked() {
 }
 
 func (cc *ClientConn) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req.Method == "CONNECT" && req.Header.Get("HACK-HTTP2-Protocol") != "" {
+	if req.Method == "CONNECT" && req.Header.Get("Hack-Http2-Protocol") != "" {
 		// This is an extended CONNECT https://datatracker.ietf.org/doc/html/rfc8441#section-4
 		// We need to check if the server supports it.
 		if err := cc.checkServerSupportsExtendedConnect(); err != nil {
@@ -1783,7 +1783,7 @@ func (cc *ClientConn) encodeHeaders(req *http.Request, addGzipHeader bool, trail
 		return nil, err
 	}
 
-	protocol := req.Header.Get("HACK-HTTP2-Protocol")
+	protocol := req.Header.Get("Hack-Http2-Protocol")
 
 	var path string
 	if req.Method != "CONNECT" || (cc.serverAllowsExtendedConnect && protocol != "") {

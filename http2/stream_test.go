@@ -87,7 +87,7 @@ func TestHTTP2Stream(t *testing.T) {
 	//              psudo headers by setting things in the headers hashmap.
 	//              I think the real solution here is to add a new `Protocol`
 	//              field to the `http.Request` struct.
-	req.Header.Add("HACK-HTTP2-Protocol", "websocket")
+	req.Header.Add("Hack-Http2-Protocol", "websocket")
 
 	resp, err := client.Transport.RoundTrip(req)
 	if err != nil {

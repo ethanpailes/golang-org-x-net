@@ -24,6 +24,8 @@ import (
 	"net/url"
 	"sync"
 	"time"
+
+	"golang.org/x/net/http2"
 )
 
 const (
@@ -64,6 +66,9 @@ var (
 	ErrNotWebSocket         = &ProtocolError{"not websocket protocol"}
 	ErrBadRequestMethod     = &ProtocolError{"bad method"}
 	ErrNotSupported         = &ProtocolError{"not supported"}
+	ErrBadPath              = &ProtocolError{"bad path"}
+	ErrBadProtocol          = &ProtocolError{"bad protocol"}
+	ErrBadHandshake         = &ProtocolError{"bad handshake"}
 )
 
 // ErrFrameTooLarge is returned by Codec's Receive method if payload size
@@ -100,6 +105,11 @@ type Config struct {
 
 	// Dialer used when opening websocket connections.
 	Dialer *net.Dialer
+
+	// Transport used when opening HTTP/2 websocket connections.
+	// Set this to use websockets over HTTP/2. If left nil, the
+	// endpoint will be directly dialed with the HTTP/1.1 protocol.
+	HTTP2Transport *http2.Transport
 
 	handshakeData map[string]string
 }

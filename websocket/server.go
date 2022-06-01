@@ -71,6 +71,16 @@ func (s Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 func (s Server) serveWebSocket(w http.ResponseWriter, req *http.Request) {
+	if req.ProtoMajor == 2 {
+		s.serveHTTP2WebSocket(w, req)
+	} else {
+		s.serveHTTP1WebSocket(w, req)
+	}
+}
+
+// serveHTTP1WebSocket serves a websocket connection over a HTTP/1.1
+// connection.
+func (s Server) serveHTTP1WebSocket(w http.ResponseWriter, req *http.Request) {
 	rwc, buf, err := w.(http.Hijacker).Hijack()
 	if err != nil {
 		panic("Hijack failed: " + err.Error())
@@ -86,6 +96,20 @@ func (s Server) serveWebSocket(w http.ResponseWriter, req *http.Request) {
 	if conn == nil {
 		panic("unexpected nil conn")
 	}
+	s.Handler(conn)
+}
+
+func (s Server) serveHTTP2WebSocket(w http.ResponseWriter, req *http.Request) {
+	handshaker := http2Handshaker{
+		config: &s.Config,
+		userHandshake: s.Handshake,
+	}
+	conn, statusCode, err := handshaker.handshake(w, req)
+	if err != nil {
+		http.Error(w, err.Error(), statusCode)
+		return
+	}
+
 	s.Handler(conn)
 }
 
