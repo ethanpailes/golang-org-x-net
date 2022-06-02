@@ -67,7 +67,6 @@ var (
 	ErrBadRequestMethod     = &ProtocolError{"bad method"}
 	ErrNotSupported         = &ProtocolError{"not supported"}
 	ErrBadPath              = &ProtocolError{"bad path"}
-	ErrBadProtocol          = &ProtocolError{"bad protocol"}
 	ErrBadHandshake         = &ProtocolError{"bad handshake"}
 )
 
